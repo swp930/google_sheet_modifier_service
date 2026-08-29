@@ -14,6 +14,7 @@ Output/Action: Mutation of sheet
 Technical Information Detailing Project Stack and other Details
 Suppose the express api is called
 mutateSheet(sheet_id, cell_number, text)
+getSheetList()
 
 > Check is sheet_id is valid and accessible
 > Check if cell_number is valid and accessible
