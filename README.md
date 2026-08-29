@@ -19,3 +19,8 @@ getSheetList()
 > Check is sheet_id is valid and accessible
 > Check if cell_number is valid and accessible
 > text doesn't need any crazy sanitation nothing to do here for now
+
+curl -X POST http://localhost:3000/mutate-sheet -H "Content-Type: application/json" -d '{"sheet_id":"1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc","cell_number":"Sheet1!A1","text":"hello3"}'
+
+Configuration details:
+Make sure to add spreadsheetmutator@credible-rex-507019-k3.iam.gserviceaccount.com as editor and turn off notify
