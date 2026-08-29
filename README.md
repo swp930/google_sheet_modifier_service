@@ -24,3 +24,7 @@ curl -X POST http://localhost:3000/mutate-sheet -H "Content-Type: application/js
 
 Configuration details:
 Make sure to add spreadsheetmutator@credible-rex-507019-k3.iam.gserviceaccount.com as editor and turn off notify
+
+nvm setup
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
