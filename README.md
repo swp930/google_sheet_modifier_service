@@ -22,6 +22,8 @@ getSheetList()
 
 curl -X POST http://localhost:3000/mutate-sheet -H "Content-Type: application/json" -d '{"sheet_id":"1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc","cell_number":"Sheet1!A1","text":"hello3"}'
 
+Sheet link: https://docs.google.com/spreadsheets/d/1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc/edit?gid=0#gid=0
+
 Configuration details:
 Make sure to add spreadsheetmutator@credible-rex-507019-k3.iam.gserviceaccount.com as editor and turn off notify
 
