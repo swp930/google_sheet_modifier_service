@@ -38,3 +38,13 @@ https://docs.google.com/spreadsheets/d/1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448S
 Fill first row with task1, task2, task3, task4, task5
 Should get this as response:
 {"ok":true,"row":1,"count":5,"data":[["A1","task1"],["B1","task2"],["C1","task3"],["D1","task4"],["E1","task5"]]}
+
+GET /column-topmost
+curl -s "http://localhost:3000/column-topmost?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&column=A&sheet_name=Sheet1"
+Fill A column with task1, atomic task 1, atomic task 2, atomic task 3, atomic task 4
+
+GET /add-to-end-of-row
+curl -s "http://localhost:3000/add-to-end-of-row?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&row=1&text=hello&sheet_name=Sheet1"
+
+GET /add-to-end-of-column
+curl -s "http://localhost:3000/add-to-end-of-column?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&column=C&text=hello&sheet_name=Sheet1"

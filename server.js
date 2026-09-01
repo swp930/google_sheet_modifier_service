@@ -257,6 +257,141 @@ async function handleGetColumnTopMost(req, res) {
     }
 }
 
+/**
+ * Append text after the last non-empty cell in a row (left → right).
+ * Empty row writes to column A.
+ *
+ * @param {string} sheetId
+ * @param {number|string} row 1-based row number
+ * @param {string|number|boolean} text
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{ cell: string, updatedRange: string, updatedCells: number }>}
+ */
+async function addToEndOfRow(sheetId, row, text, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+    if (row === undefined || row === null || row === '') throw new Error('row is required');
+    if (text === undefined || text === null) throw new Error('text is required');
+
+    const rowNumber = Number(row);
+    if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+        throw new Error('row must be a positive integer');
+    }
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const range = `${sheetName}!${rowNumber}:${rowNumber}`;
+    const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range,
+        majorDimension: 'ROWS',
+    });
+
+    const values = result.data.values?.[0] || [];
+
+    let last = -1;
+    for (let i = 0; i < values.length; i += 1) {
+        if (!isEmptyCell(values[i])) last = i;
+    }
+
+    const targetIndex = last + 1; // next cell after last used; 0 if row empty
+    const cell = `${sheetName}!${columnIndexToLetter(targetIndex)}${rowNumber}`;
+
+    const update = await mutateSheet(sheetId, cell, text);
+
+    return {
+        cell,
+        updatedRange: update.updatedRange,
+        updatedCells: update.updatedCells,
+    };
+}
+
+async function handleAddToEndOfRow(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const row = req.body?.row ?? req.query.row;
+        const text = req.body?.text ?? req.query.text;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await addToEndOfRow(sheetId, row, text, sheetName);
+
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status = err.code === 400 || /required|must be/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+/**
+ * Append text after the last non-empty cell in a column (top → bottom).
+ * Empty column writes to row 1.
+ *
+ * @param {string} sheetId
+ * @param {string|number} column letter ("C") or 1-based index (3)
+ * @param {string|number|boolean} text
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{ cell: string, updatedRange: string, updatedCells: number }>}
+ */
+async function addToEndOfColumn(sheetId, column, text, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+    if (text === undefined || text === null) throw new Error('text is required');
+
+    const colLetter = normalizeColumn(column);
+    columnLetterToIndex(colLetter);
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const range = `${sheetName}!${colLetter}:${colLetter}`;
+    const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range,
+        majorDimension: 'COLUMNS',
+    });
+
+    const values = result.data.values?.[0] || [];
+
+    let last = -1;
+    for (let i = 0; i < values.length; i += 1) {
+        if (!isEmptyCell(values[i])) last = i;
+    }
+
+    const targetRow = last + 2; // last is 0-based; next row is last+2
+    const cell = `${sheetName}!${colLetter}${targetRow}`;
+
+    const update = await mutateSheet(sheetId, cell, text);
+
+    return {
+        cell,
+        updatedRange: update.updatedRange,
+        updatedCells: update.updatedCells,
+    };
+}
+
+async function handleAddToEndOfColumn(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const column = req.body?.column ?? req.query.column;
+        const text = req.body?.text ?? req.query.text;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await addToEndOfColumn(sheetId, column, text, sheetName);
+
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status = err.code === 400 || /required|must be|letter/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+app.post('/add-to-end-of-column', handleAddToEndOfColumn);
+app.get('/add-to-end-of-column', handleAddToEndOfColumn);
+
+app.post('/add-to-end-of-row', handleAddToEndOfRow);
+app.get('/add-to-end-of-row', handleAddToEndOfRow);
+
 app.post('/column-topmost', handleGetColumnTopMost);
 app.get('/column-topmost', handleGetColumnTopMost);
 
