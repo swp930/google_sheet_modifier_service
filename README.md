@@ -30,3 +30,11 @@ Make sure to add spreadsheetmutator@credible-rex-507019-k3.iam.gserviceaccount.c
 nvm setup
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+Test Documentation
+GET /row-leftmost
+curl -s "http://localhost:3000/row-leftmost?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&row=1&sheet_name=Sheet1"
+https://docs.google.com/spreadsheets/d/1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc/edit?gid=0#gid=0
+Fill first row with task1, task2, task3, task4, task5
+Should get this as response:
+{"ok":true,"row":1,"count":5,"data":[["A1","task1"],["B1","task2"],["C1","task3"],["D1","task4"],["E1","task5"]]}

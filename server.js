@@ -83,6 +83,186 @@ async function handleMutate(req, res) {
     }
 }
 
+/**
+ * Column index (0-based) -> A1 column letters.
+ * 0 -> A, 25 -> Z, 26 -> AA
+ */
+function columnIndexToLetter(index) {
+    let n = index;
+    let letters = '';
+    while (n >= 0) {
+        letters = String.fromCharCode((n % 26) + 65) + letters;
+        n = Math.floor(n / 26) - 1;
+    }
+    return letters;
+}
+
+function isEmptyCell(value) {
+    return value === undefined || value === null || String(value).trim() === '';
+}
+
+/**
+ * Contiguous non-empty cells in a row, starting at the first non-empty cell from the left.
+ *
+ * @param {string} sheetId spreadsheet id
+ * @param {number|string} row 1-based row number
+ * @param {string} [sheetName='Sheet1'] tab name
+ * @returns {Promise<Array<[string, string]>>} e.g. [['C5', 'foo'], ['D5', 'bar']]
+ */
+async function getDataForRowLeftMost(sheetId, row, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+    if (row === undefined || row === null || row === '') throw new Error('row is required');
+
+    const rowNumber = Number(row);
+    if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+        throw new Error('row must be a positive integer');
+    }
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    // Entire row; Sheets only returns up to the last non-empty cell
+    const range = `${sheetName}!${rowNumber}:${rowNumber}`;
+    const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range,
+        majorDimension: 'ROWS',
+    });
+
+    const values = result.data.values?.[0] || [];
+
+    let start = 0;
+    while (start < values.length && isEmptyCell(values[start])) {
+        start += 1;
+    }
+
+    if (start >= values.length) return [];
+
+    let end = start;
+    while (end < values.length && !isEmptyCell(values[end])) {
+        end += 1;
+    }
+
+    const tuples = [];
+    for (let i = start; i < end; i += 1) {
+        const cellId = `${columnIndexToLetter(i)}${rowNumber}`;
+        tuples.push([cellId, String(values[i])]);
+    }
+
+    return tuples;
+}
+
+async function handleGetRowLeftMost(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const row = req.body?.row ?? req.query.row;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await getDataForRowLeftMost(sheetId, row, sheetName);
+
+        res.json({ ok: true, row: Number(row), count: data.length, data });
+    } catch (err) {
+        const status = err.code === 400 || /required|must be/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+function columnLetterToIndex(letter) {
+    const s = String(letter).trim().toUpperCase();
+    if (!/^[A-Z]+$/.test(s)) {
+        throw new Error('column must be a letter like A, B, or AA');
+    }
+    let n = 0;
+    for (let i = 0; i < s.length; i += 1) {
+        n = n * 26 + (s.charCodeAt(i) - 64);
+    }
+    return n - 1; // 0-based
+}
+
+function normalizeColumn(column) {
+    if (column === undefined || column === null || column === '') {
+        throw new Error('column is required');
+    }
+    if (typeof column === 'number' || /^\d+$/.test(String(column))) {
+        const n = Number(column);
+        if (!Number.isInteger(n) || n < 1) {
+            throw new Error('numeric column must be a 1-based integer');
+        }
+        return columnIndexToLetter(n - 1);
+    }
+    return String(column).trim().toUpperCase();
+}
+
+/**
+ * Contiguous non-empty cells in a column, starting at the first non-empty cell from the top.
+ *
+ * @param {string} sheetId
+ * @param {string|number} column letter ("C") or 1-based index (3)
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<Array<[string, string]>>} e.g. [['C2', 'foo'], ['C3', 'bar']]
+ */
+async function getDataForColumnTopMost(sheetId, column, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+
+    const colLetter = normalizeColumn(column);
+    columnLetterToIndex(colLetter); // validate
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const range = `${sheetName}!${colLetter}:${colLetter}`;
+    const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range,
+        majorDimension: 'COLUMNS',
+    });
+
+    const values = result.data.values?.[0] || [];
+
+    let start = 0;
+    while (start < values.length && isEmptyCell(values[start])) {
+        start += 1;
+    }
+
+    if (start >= values.length) return [];
+
+    let end = start;
+    while (end < values.length && !isEmptyCell(values[end])) {
+        end += 1;
+    }
+
+    const tuples = [];
+    for (let i = start; i < end; i += 1) {
+        const cellId = `${colLetter}${i + 1}`;
+        tuples.push([cellId, String(values[i])]);
+    }
+
+    return tuples;
+}
+
+async function handleGetColumnTopMost(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const column = req.body?.column ?? req.query.column;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await getDataForColumnTopMost(sheetId, column, sheetName);
+
+        res.json({ ok: true, column: normalizeColumn(column), count: data.length, data });
+    } catch (err) {
+        const status = err.code === 400 || /required|must be|letter/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+app.post('/column-topmost', handleGetColumnTopMost);
+app.get('/column-topmost', handleGetColumnTopMost);
+
+app.post('/row-leftmost', handleGetRowLeftMost);
+app.get('/row-leftmost', handleGetRowLeftMost);
+
 app.post('/mutate-sheet', handleMutate);
 app.get('/mutate-sheet', handleMutate);
 
