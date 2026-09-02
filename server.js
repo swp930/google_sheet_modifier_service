@@ -386,6 +386,173 @@ async function handleAddToEndOfColumn(req, res) {
     }
 }
 
+/**
+ * Resolve a tab name to the numeric sheetId required by batchUpdate.
+ */
+async function getTabId(sheets, spreadsheetId, sheetName) {
+    const meta = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties',
+    });
+
+    const tab = (meta.data.sheets || []).find(
+        (s) => s.properties?.title === sheetName
+    );
+
+    if (!tab) {
+        throw new Error(`Sheet tab "${sheetName}" not found`);
+    }
+
+    return tab.properties.sheetId;
+}
+
+/**
+ * Delete a column and shift everything to its right leftward.
+ *
+ * @param {string} spreadsheetId
+ * @param {string|number} column letter ("C") or 1-based index (3)
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{ column: string, columnIndex: number, sheetName: string, tabId: number }>}
+ */
+async function deleteColumnShiftLeft(spreadsheetId, column, sheetName = 'Sheet1') {
+    if (!spreadsheetId) throw new Error('sheet_id is required');
+
+    const colLetter = normalizeColumn(column);
+    const colIndex = columnLetterToIndex(colLetter); // 0-based
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabId = await getTabId(sheets, spreadsheetId, sheetName);
+
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests: [
+                {
+                    deleteDimension: {
+                        range: {
+                            sheetId: tabId,
+                            dimension: 'COLUMNS',
+                            startIndex: colIndex,
+                            endIndex: colIndex + 1,
+                        },
+                    },
+                },
+            ],
+        },
+    });
+
+    return {
+        column: colLetter,
+        columnIndex: colIndex,
+        sheetName,
+        tabId,
+    };
+}
+
+async function handleDeleteColumnShiftLeft(req, res) {
+    try {
+        const spreadsheetId = req.body?.sheet_id || req.query.sheet_id;
+        const column = req.body?.column ?? req.query.column;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await deleteColumnShiftLeft(spreadsheetId, column, sheetName);
+
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status =
+            err.code === 400 || /required|must be|letter|not found/i.test(err.message)
+                ? 400
+                : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+/**
+ * Write `tasks` as a new column immediately to the right of the
+ * rightmost non-empty cell on the sheet. One values.update for the write.
+ *
+ * Empty sheet → column A, starting at row 1.
+ *
+ * @param {string} sheetId
+ * @param {Array<string|number|boolean>} tasks
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{ column: string, startCell: string, count: number, updatedRange: string }>}
+ */
+async function addToColumnRightMost(sheetId, tasks, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+        throw new Error('tasks must be a non-empty array');
+    }
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const existing = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: sheetName,
+        majorDimension: 'ROWS',
+    });
+
+    const rows = existing.data.values || [];
+    let maxCols = 0;
+    for (const row of rows) {
+        let last = -1;
+        for (let i = 0; i < row.length; i += 1) {
+            if (!isEmptyCell(row[i])) last = i;
+        }
+        if (last + 1 > maxCols) maxCols = last + 1;
+    }
+
+    const colLetter = columnIndexToLetter(maxCols); // next empty column (0-based)
+    const startCell = `${sheetName}!${colLetter}1`;
+    const values = tasks.map((t) => [t]);
+
+    const update = await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: startCell,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values },
+    });
+
+    return {
+        column: colLetter,
+        startCell,
+        count: tasks.length,
+        updatedRange: update.data.updatedRange,
+        updatedCells: update.data.updatedCells,
+    };
+}
+
+async function handleAddToColumnRightMost(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        let tasks = req.body?.tasks ?? req.query.tasks;
+        if (typeof tasks === 'string') {
+            tasks = tasks.split(',').map((s) => s.trim()).filter(Boolean);
+        }
+
+        const data = await addToColumnRightMost(sheetId, tasks, sheetName);
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status =
+            err.code === 400 || /required|must be|non-empty/i.test(err.message)
+                ? 400
+                : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+app.post('/add-to-column-rightmost', handleAddToColumnRightMost);
+app.get('/add-to-column-rightmost', handleAddToColumnRightMost);
+
+app.post('/delete-column', handleDeleteColumnShiftLeft);
+app.get('/delete-column', handleDeleteColumnShiftLeft);
+
 app.post('/add-to-end-of-column', handleAddToEndOfColumn);
 app.get('/add-to-end-of-column', handleAddToEndOfColumn);
 

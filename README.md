@@ -48,3 +48,7 @@ curl -s "http://localhost:3000/add-to-end-of-row?sheet_id=1pm6uH4SrOXdML5qp7iatD
 
 GET /add-to-end-of-column
 curl -s "http://localhost:3000/add-to-end-of-column?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&column=C&text=hello&sheet_name=Sheet1"
+
+curl "http://localhost:3000/delete-column?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&column=D&sheet_name=Sheet2"
+
+curl -X POST "http://localhost:3000/add-to-column-rightmost" -H "Content-Type: application/json" -d '{"sheet_id":"1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc","sheet_name":"Sheet2","tasks":["buy milk","call Sam","ship box"]}'
