@@ -52,3 +52,7 @@ curl -s "http://localhost:3000/add-to-end-of-column?sheet_id=1pm6uH4SrOXdML5qp7i
 curl "http://localhost:3000/delete-column?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&column=D&sheet_name=Sheet2"
 
 curl -X POST "http://localhost:3000/add-to-column-rightmost" -H "Content-Type: application/json" -d '{"sheet_id":"1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc","sheet_name":"Sheet2","tasks":["buy milk","call Sam","ship box"]}'
+
+curl -s "http://localhost:3000/rightmost-column?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&sheet_name=Sheet2" | jq
+
+curl -s "http://localhost:3000/empty-columns?sheet_id=1pm6uH4SrOXdML5qp7iatDQBrDHXQltDOzKoB448Soyc&sheet_name=Sheet1"

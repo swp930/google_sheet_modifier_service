@@ -547,6 +547,266 @@ async function handleAddToColumnRightMost(req, res) {
     }
 }
 
+/**
+ * Rightmost column that has at least one non-empty cell.
+ * Empty sheet → column null, columnNumber 0.
+ *
+ * @param {string} sheetId
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{
+*   column: string|null,
+*   columnIndex: number|null,
+*   columnNumber: number,
+*   sheetName: string,
+*   empty: boolean
+* }>}
+*/
+async function getRightmostColumn(sheetId, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const existing = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: sheetName,
+        majorDimension: 'ROWS',
+    });
+
+    const rows = existing.data.values || [];
+    let maxCols = 0;
+    for (const row of rows) {
+        let last = -1;
+        for (let i = 0; i < row.length; i += 1) {
+            if (!isEmptyCell(row[i])) last = i;
+        }
+        if (last + 1 > maxCols) maxCols = last + 1;
+    }
+
+    if (maxCols === 0) {
+        return {
+            column: null,
+            columnIndex: null,
+            columnNumber: 0,
+            sheetName,
+            empty: true,
+        };
+    }
+
+    const columnIndex = maxCols - 1; // 0-based
+    return {
+        column: columnIndexToLetter(columnIndex),
+        columnIndex,
+        columnNumber: maxCols, // 1-based, Sheets-style
+        sheetName,
+        empty: false,
+    };
+}
+
+async function handleGetRightmostColumn(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await getRightmostColumn(sheetId, sheetName);
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status = err.code === 400 || /required/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+/**
+ * Count fully empty columns inside the used range (A through the
+ * rightmost column that has any non-empty cell).
+ *
+ * A column is empty if every cell in that column is blank/whitespace.
+ * Columns past the last used column are not counted — Sheets has no
+ * finite "end" of the grid for that purpose.
+ *
+ * Empty sheet → emptyColumnCount 0, usedColumns 0, empty true.
+ *
+ * @param {string} sheetId
+ * @param {string} [sheetName='Sheet1']
+ * @returns {Promise<{
+*   emptyColumnCount: number,
+*   emptyColumns: string[],
+*   usedColumns: number,
+*   usedColumnLetters: string[],
+*   sheetName: string,
+*   empty: boolean
+* }>}
+*/
+async function getEmptyColumnCount(sheetId, sheetName = 'Sheet1') {
+    if (!sheetId) throw new Error('sheet_id is required');
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const [existing, meta] = await Promise.all([
+        sheets.spreadsheets.values.get({
+            spreadsheetId: sheetId,
+            range: sheetName,
+            majorDimension: 'ROWS',
+        }),
+        sheets.spreadsheets.get({
+            spreadsheetId: sheetId,
+            fields: 'sheets.properties',
+        }),
+    ]);
+
+    const tab = (meta.data.sheets || []).find(
+        (s) => s.properties?.title === sheetName
+    );
+    if (!tab) {
+        throw new Error(`Sheet tab "${sheetName}" not found`);
+    }
+
+    const columnCount = tab.properties.gridProperties?.columnCount || 0;
+
+    const rows = existing.data.values || [];
+    const hasData = Array(columnCount).fill(false);
+    let maxUsed = 0;
+
+    for (const row of rows) {
+        const limit = Math.min(row.length, columnCount);
+        for (let i = 0; i < limit; i += 1) {
+            if (!isEmptyCell(row[i])) {
+                hasData[i] = true;
+                if (i + 1 > maxUsed) maxUsed = i + 1;
+            }
+        }
+    }
+
+    const emptyColumns = [];
+    const usedColumnLetters = [];
+    for (let i = 0; i < columnCount; i += 1) {
+        const letter = columnIndexToLetter(i);
+        if (hasData[i]) usedColumnLetters.push(letter);
+        else emptyColumns.push(letter);
+    }
+
+    return {
+        emptyColumnCount: emptyColumns.length,
+        emptyColumns,
+        usedColumns: maxUsed,
+        usedColumnLetters,
+        gridColumnCount: columnCount,
+        lastGridColumn: columnCount ? columnIndexToLetter(columnCount - 1) : null,
+        sheetName,
+        empty: maxUsed === 0,
+    };
+}
+
+async function handleGetEmptyColumnCount(req, res) {
+    try {
+        const sheetId = req.body?.sheet_id || req.query.sheet_id;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+
+        const data = await getEmptyColumnCount(sheetId, sheetName);
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status = err.code === 400 || /required/i.test(err.message) ? 400 : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+/**
+ * Append `count` empty columns after the current grid width.
+ */
+async function addEmptyColumnsToEnd(spreadsheetId, count, sheetName = 'Sheet1') {
+    if (!spreadsheetId) throw new Error('sheet_id is required');
+
+    count = Number(count);
+    if (!Number.isInteger(count) || count < 1) {
+        throw new Error('count must be a positive integer');
+    }
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const meta = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties',
+    });
+
+    const tab = (meta.data.sheets || []).find(
+        (s) => s.properties?.title === sheetName
+    );
+    if (!tab) {
+        throw new Error(`Sheet tab "${sheetName}" not found`);
+    }
+
+    const tabId = tab.properties.sheetId;
+    const columnCount = tab.properties.gridProperties?.columnCount || 0;
+
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests: [
+                {
+                    insertDimension: {
+                        range: {
+                            sheetId: tabId,
+                            dimension: 'COLUMNS',
+                            startIndex: columnCount,
+                            endIndex: columnCount + count,
+                        },
+                        inheritFromBefore: columnCount > 0,
+                    },
+                },
+            ],
+        },
+    });
+
+    const firstNew = columnIndexToLetter(columnCount);
+    const lastNew = columnIndexToLetter(columnCount + count - 1);
+
+    return {
+        sheetName,
+        tabId,
+        added: count,
+        previousColumnCount: columnCount,
+        newColumnCount: columnCount + count,
+        insertedRange: `${firstNew}:${lastNew}`,
+    };
+}
+
+async function handleAddEmptyColumnsToEnd(req, res) {
+    try {
+        const spreadsheetId = req.body?.sheet_id || req.query.sheet_id;
+        const sheetName = req.body?.sheet_name || req.query.sheet_name || 'Sheet1';
+        const count =
+            req.body?.count ??
+            req.body?.amount ??
+            req.body?.x ??
+            req.query.count ??
+            req.query.amount ??
+            req.query.x;
+
+        const data = await addEmptyColumnsToEnd(spreadsheetId, count, sheetName);
+        res.json({ ok: true, ...data });
+    } catch (err) {
+        const status =
+            err.code === 400 || /required|must be|not found/i.test(err.message)
+                ? 400
+                : 500;
+        console.error(err);
+        res.status(status).json({ ok: false, error: err.message });
+    }
+}
+
+app.post('/add-empty-columns', handleAddEmptyColumnsToEnd);
+app.get('/add-empty-columns', handleAddEmptyColumnsToEnd);
+
+app.post('/empty-columns', handleGetEmptyColumnCount);
+app.get('/empty-columns', handleGetEmptyColumnCount);
+
+app.post('/rightmost-column', handleGetRightmostColumn);
+app.get('/rightmost-column', handleGetRightmostColumn);
+
 app.post('/add-to-column-rightmost', handleAddToColumnRightMost);
 app.get('/add-to-column-rightmost', handleAddToColumnRightMost);
 
